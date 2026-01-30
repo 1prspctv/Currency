@@ -810,7 +810,234 @@ Track the same asset across different markets:
 | Polygon.io | FX, Crypto | Developer-friendly |
 | IEX Cloud | Broad | Good API, reasonable cost |
 
-### 5.9 Historical Data
+### 5.9 FREE Data Sources (Quality Tier Ranked)
+
+#### Tier 1: Excellent Free Sources (Production Quality)
+
+| Source | Asset Classes | API | Rate Limit | Quality |
+|--------|---------------|-----|------------|---------|
+| **Yahoo Finance** (yfinance) | FX, Metals, Commodities, Crypto | Python lib | ~2000/hr | ⭐⭐⭐⭐ |
+| **FRED (St. Louis Fed)** | FX rates, interest rates, economic | REST | Unlimited | ⭐⭐⭐⭐⭐ |
+| **ECB Data Portal** | EUR crosses, official rates | REST/SDMX | Unlimited | ⭐⭐⭐⭐⭐ |
+| **Bank of England** | GBP rates, historical | REST | Unlimited | ⭐⭐⭐⭐⭐ |
+| **Exchangerate.host** | 170+ FX pairs | REST | 1000/mo free | ⭐⭐⭐⭐ |
+| **Open Exchange Rates** | FX rates | REST | 1000/mo free | ⭐⭐⭐⭐ |
+
+#### Tier 2: Good Free Sources (Development/Research)
+
+| Source | Asset Classes | Update Freq | Notes |
+|--------|---------------|-------------|-------|
+| **Alpha Vantage** | FX, Crypto, Stocks | 5/min, 500/day | Good for prototyping |
+| **CoinGecko** | Crypto only | 10-50/min | Excellent crypto coverage |
+| **CoinMarketCap** | Crypto only | 333/day free | Market cap focus |
+| **Metals-API** | Precious metals | 50/mo free | Gold, Silver, Platinum |
+| **GoldAPI.io** | Precious metals | 300/mo free | Real-time gold |
+| **Twelve Data** | FX, Stocks, Crypto | 800/day free | Good documentation |
+
+#### Tier 3: Government & Central Bank Sources (Best for EM)
+
+| Source | Coverage | Update | API |
+|--------|----------|--------|-----|
+| **PBOC** (China) | CNY fixing, rates | Daily | Web scrape |
+| **RBI** (India) | INR reference rates | Daily | Web scrape |
+| **BCB** (Brazil) | BRL rates, PTAX | Daily | REST API |
+| **Banxico** (Mexico) | MXN rates | Daily | REST API |
+| **SARB** (South Africa) | ZAR rates | Daily | Web scrape |
+| **BOJ** (Japan) | JPY rates | Daily | REST |
+| **BIS** | Cross-border flows | Monthly | REST/CSV |
+
+#### Tier 4: Commodity-Specific Free Sources
+
+| Source | Commodities | Update | Format |
+|--------|-------------|--------|--------|
+| **EIA.gov** | Oil, Gas, Coal, Uranium | Weekly/Daily | REST API |
+| **USDA** | All agricultural | Weekly | REST/FTP |
+| **LME** (delayed) | Base metals | 15-min delay | Web |
+| **Kitco** (delayed) | Precious metals | 15-min delay | Web scrape |
+| **Investing.com** | Everything | Real-time | Web scrape |
+| **Trading Economics** | Everything | Daily | Web scrape |
+
+#### Detailed Free Source Specifications
+
+**Yahoo Finance (via yfinance Python library)**
+```python
+# Best free source for multi-asset coverage
+import yfinance as yf
+
+# FX rates
+eurusd = yf.Ticker("EURUSD=X")
+gbpjpy = yf.Ticker("GBPJPY=X")
+
+# Precious metals
+gold = yf.Ticker("GC=F")      # Gold futures
+silver = yf.Ticker("SI=F")    # Silver futures
+
+# Energy
+wti = yf.Ticker("CL=F")       # WTI crude
+brent = yf.Ticker("BZ=F")     # Brent crude
+natgas = yf.Ticker("NG=F")    # Natural gas
+
+# Agricultural
+corn = yf.Ticker("ZC=F")
+wheat = yf.Ticker("ZW=F")
+soybeans = yf.Ticker("ZS=F")
+coffee = yf.Ticker("KC=F")
+
+# EM currencies
+usdbrl = yf.Ticker("BRL=X")
+usdmxn = yf.Ticker("MXN=X")
+usdzar = yf.Ticker("ZAR=X")
+usdtry = yf.Ticker("TRY=X")
+usdcny = yf.Ticker("CNY=X")
+```
+
+**FRED (Federal Reserve Economic Data)**
+```
+https://api.stlouisfed.org/fred/series/observations
+
+Key Series IDs:
+- DEXUSEU: USD/EUR daily
+- DEXJPUS: JPY/USD daily
+- DEXCHUS: CNY/USD daily
+- DEXBZUS: BRL/USD daily
+- GOLDAMGBD228NLBM: London gold fixing
+- DCOILWTICO: WTI crude spot
+- DCOILBRENTEU: Brent crude spot
+- DHHNGSP: Henry Hub natural gas
+- PCOFFOTMUSDM: Coffee price
+- PCOALAUUSDM: Coal price
+
+Rate limit: None (with free API key)
+History: 50+ years for many series
+```
+
+**ECB Statistical Data Warehouse**
+```
+https://sdw-wsrest.ecb.europa.eu/service/data/
+
+Excellent for:
+- EUR crosses (official ECB rates)
+- Euro area interest rates
+- Historical data back to 1999
+
+Example: EUR/USD daily
+https://sdw-wsrest.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A
+```
+
+**Open Exchange Rates / Exchangerate.host**
+```
+# Free tier: 1000 requests/month
+https://api.exchangerate.host/latest?base=USD
+
+# Historical rates
+https://api.exchangerate.host/2024-01-15?base=USD
+
+Coverage: 170+ currencies including:
+- All G10
+- Most EM (BRL, MXN, ZAR, TRY, INR, etc.)
+- Crypto (BTC, ETH)
+```
+
+**EIA (Energy Information Administration)**
+```
+https://api.eia.gov/v2/
+
+Free API key required
+Excellent coverage:
+- WTI/Brent spot and futures
+- Natural gas (Henry Hub, regional)
+- Petroleum products
+- Coal prices
+- Uranium prices
+- Storage/inventory data
+
+Weekly petroleum status report: Key for energy arb
+```
+
+**USDA (Agricultural Data)**
+```
+https://quickstats.nass.usda.gov/api
+
+Coverage:
+- All major grains (corn, wheat, soybeans)
+- Livestock
+- Dairy
+- Production, stocks, exports
+
+Also: WASDE reports for supply/demand
+```
+
+#### Free Source Limitations & Workarounds
+
+| Limitation | Impact | Workaround |
+|------------|--------|------------|
+| 15-min delay | Missed fast arb | Combine multiple sources |
+| Rate limits | Gaps in data | Cache aggressively, batch requests |
+| No tick data | Can't detect micro-arb | Focus on statistical arb (longer hold) |
+| Weekend gaps | FX gap risk | Use crypto as proxy for weekend sentiment |
+| EM coverage | Limited CNH, NDF | Use central bank sources directly |
+
+#### Recommended Free Stack for MVP
+
+**For FX Arbitrage:**
+1. Yahoo Finance (yfinance) - Primary real-time
+2. FRED - Historical backfill
+3. ECB - EUR cross validation
+4. Central banks - EM official rates
+
+**For Commodity-Currency Correlation:**
+1. Yahoo Finance - Commodity futures
+2. EIA - Energy official data
+3. USDA - Agricultural data
+4. FRED - Historical prices
+
+**For Precious Metals:**
+1. Yahoo Finance - Futures prices
+2. FRED - LBMA fixing
+3. GoldAPI.io - Real-time spot
+4. Kitco (scrape) - Multi-metal
+
+**For Crypto Arbitrage:**
+1. CoinGecko - Comprehensive, free
+2. Binance API - Free, real-time
+3. Coinbase API - Free, US prices
+4. CoinMarketCap - Market data
+
+#### Sample Data Pipeline (Free Sources)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    FREE DATA PIPELINE                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │   yfinance   │    │     FRED     │    │  Central     │  │
+│  │  (Real-time) │    │ (Historical) │    │   Banks      │  │
+│  └──────┬───────┘    └──────┬───────┘    └──────┬───────┘  │
+│         │                   │                   │           │
+│         └─────────┬─────────┴─────────┬─────────┘           │
+│                   ▼                   ▼                     │
+│         ┌─────────────────────────────────────┐             │
+│         │         DATA NORMALIZER              │             │
+│         │  • Align timestamps                  │             │
+│         │  • Handle missing data               │             │
+│         │  • Convert units                     │             │
+│         └─────────────────┬───────────────────┘             │
+│                           ▼                                  │
+│         ┌─────────────────────────────────────┐             │
+│         │         LOCAL CACHE (SQLite)         │             │
+│         │  • 1-min OHLCV for recent            │             │
+│         │  • Daily for historical              │             │
+│         └─────────────────┬───────────────────┘             │
+│                           ▼                                  │
+│         ┌─────────────────────────────────────┐             │
+│         │       ARBITRAGE CALCULATOR           │             │
+│         └─────────────────────────────────────┘             │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 5.10 Historical Data
 
 | Data Type | Granularity | History Depth | Sources |
 |-----------|-------------|---------------|---------|
@@ -820,7 +1047,7 @@ Track the same asset across different markets:
 | EM FX | Daily | 10+ years | Central banks, BIS |
 | Agricultural | Daily | 30+ years | USDA, CME |
 
-### 5.10 Derived/Calculated Data
+### 5.11 Derived/Calculated Data
 
 **Core Calculations:**
 - Implied cross rates from direct rates
@@ -839,7 +1066,7 @@ Track the same asset across different markets:
 - Liquidity scores
 - Stress test scenarios
 
-### 5.11 Reference Data
+### 5.12 Reference Data
 
 | Data Type | Sources | Update Frequency |
 |-----------|---------|------------------|
