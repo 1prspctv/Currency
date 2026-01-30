@@ -2080,7 +2080,543 @@ RECOMMENDATIONS
 • FX opportunities limited today - check Asian session
 ```
 
-### 16.9 Scaling Plan
+### 16.9 Tax Reporting & Compliance System
+
+#### Why This Matters
+
+High-frequency arbitrage trading can generate **hundreds to thousands of trades per month**. Without proper tracking:
+- Tax filing becomes nearly impossible
+- Audit risk increases significantly
+- You may overpay taxes or face penalties
+- Cost basis errors compound over time
+
+#### Trade Log Schema (Every Trade Captured)
+
+```python
+@dataclass
+class TaxableTrade:
+    """Complete record for tax reporting - IRS/HMRC compliant"""
+
+    # === IDENTIFICATION ===
+    trade_id: str               # Unique ID: "TRD-20260130-143215-001"
+    timestamp_utc: datetime     # Exact execution time (UTC)
+    timestamp_local: datetime   # Local time for reporting
+    tax_year: int               # 2026
+
+    # === ASSET DETAILS ===
+    asset_type: str             # "CRYPTO", "FOREX", "COMMODITY", "CFD"
+    symbol: str                 # "BTC/USDT", "EUR/USD", "GC"
+    asset_name: str             # "Bitcoin", "Euro", "Gold Futures"
+
+    # === TRANSACTION DETAILS ===
+    side: str                   # "BUY" or "SELL"
+    quantity: Decimal           # Exact amount (use Decimal, not float!)
+    price: Decimal              # Execution price
+    gross_value: Decimal        # quantity × price
+    currency: str               # "USD", "EUR", etc.
+
+    # === COST BASIS (Critical for taxes) ===
+    cost_basis_method: str      # "FIFO", "LIFO", "HIFO", "SPECIFIC_ID"
+    acquisition_date: datetime  # When asset was originally acquired
+    acquisition_price: Decimal  # Original purchase price
+    acquisition_cost: Decimal   # Total cost including fees
+    holding_period_days: int    # Days held (for short/long-term)
+
+    # === FEES & COSTS ===
+    exchange_fee: Decimal       # Trading fee
+    network_fee: Decimal        # Blockchain fee (crypto)
+    spread_cost: Decimal        # Implicit spread cost
+    total_fees: Decimal         # All fees combined
+
+    # === GAIN/LOSS CALCULATION ===
+    proceeds: Decimal           # Sale price - fees
+    cost_basis: Decimal         # Acquisition cost + fees
+    realized_gain_loss: Decimal # proceeds - cost_basis
+    gain_loss_type: str         # "SHORT_TERM" or "LONG_TERM"
+
+    # === EXCHANGE/BROKER INFO ===
+    exchange: str               # "Binance", "OANDA", etc.
+    exchange_trade_id: str      # Exchange's internal ID
+    account_id: str             # Account identifier
+    order_type: str             # "MARKET", "LIMIT"
+
+    # === ARBITRAGE SPECIFIC ===
+    strategy: str               # "CROSS_EXCHANGE", "TRIANGULAR", "STAT_ARB"
+    related_trade_ids: List[str] # Linked trades (for multi-leg)
+    is_wash_sale: bool          # Wash sale rule flag
+    wash_sale_adjustment: Decimal # Disallowed loss amount
+
+    # === AUDIT TRAIL ===
+    raw_exchange_response: str  # JSON of exchange API response
+    order_id: str               # Original order ID
+    fill_id: str                # Fill/execution ID
+    notes: str                  # Any manual notes
+```
+
+#### Database Storage Structure
+
+```sql
+-- Primary trade log table
+CREATE TABLE trade_log (
+    trade_id VARCHAR(50) PRIMARY KEY,
+    timestamp_utc TIMESTAMP NOT NULL,
+    tax_year INT NOT NULL,
+
+    -- Asset info
+    asset_type VARCHAR(20) NOT NULL,
+    symbol VARCHAR(20) NOT NULL,
+    side VARCHAR(4) NOT NULL,
+
+    -- Amounts (stored as integers in smallest unit to avoid float errors)
+    quantity_raw BIGINT NOT NULL,
+    quantity_decimals INT NOT NULL,
+    price_raw BIGINT NOT NULL,
+    price_decimals INT NOT NULL,
+
+    -- Cost basis
+    cost_basis_method VARCHAR(20) NOT NULL,
+    acquisition_date TIMESTAMP,
+    acquisition_price_raw BIGINT,
+    holding_period_days INT,
+
+    -- Fees
+    exchange_fee_raw BIGINT DEFAULT 0,
+    network_fee_raw BIGINT DEFAULT 0,
+    total_fees_raw BIGINT DEFAULT 0,
+
+    -- Gain/Loss
+    proceeds_raw BIGINT,
+    cost_basis_raw BIGINT,
+    realized_gain_loss_raw BIGINT,
+    gain_loss_type VARCHAR(15),
+
+    -- Metadata
+    exchange VARCHAR(50) NOT NULL,
+    exchange_trade_id VARCHAR(100),
+    strategy VARCHAR(50),
+    is_wash_sale BOOLEAN DEFAULT FALSE,
+    wash_sale_adjustment_raw BIGINT DEFAULT 0,
+
+    -- Audit
+    raw_response JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Indexes for tax reporting queries
+    INDEX idx_tax_year (tax_year),
+    INDEX idx_timestamp (timestamp_utc),
+    INDEX idx_asset (asset_type, symbol),
+    INDEX idx_gain_loss_type (gain_loss_type)
+);
+
+-- Lot tracking for cost basis (FIFO/LIFO/HIFO)
+CREATE TABLE asset_lots (
+    lot_id VARCHAR(50) PRIMARY KEY,
+    asset_symbol VARCHAR(20) NOT NULL,
+    acquisition_date TIMESTAMP NOT NULL,
+    acquisition_price_raw BIGINT NOT NULL,
+    original_quantity_raw BIGINT NOT NULL,
+    remaining_quantity_raw BIGINT NOT NULL,
+    exchange VARCHAR(50) NOT NULL,
+    source_trade_id VARCHAR(50),
+    is_depleted BOOLEAN DEFAULT FALSE,
+
+    INDEX idx_asset_fifo (asset_symbol, acquisition_date),
+    INDEX idx_remaining (asset_symbol, is_depleted)
+);
+
+-- Daily P&L summary for quick reporting
+CREATE TABLE daily_summary (
+    date DATE PRIMARY KEY,
+    tax_year INT NOT NULL,
+    total_trades INT,
+    gross_proceeds_raw BIGINT,
+    total_cost_basis_raw BIGINT,
+    total_fees_raw BIGINT,
+    net_short_term_gain_raw BIGINT,
+    net_long_term_gain_raw BIGINT,
+    wash_sale_adjustments_raw BIGINT
+);
+```
+
+#### Cost Basis Methods Supported
+
+| Method | Description | Best For | IRS Compliant |
+|--------|-------------|----------|---------------|
+| **FIFO** | First In, First Out | Default, simple | Yes |
+| **LIFO** | Last In, First Out | Tax-loss harvesting | Yes |
+| **HIFO** | Highest In, First Out | Minimize gains | Yes |
+| **Specific ID** | Choose exact lot | Maximum control | Yes (if documented) |
+
+```python
+class CostBasisTracker:
+    def __init__(self, method="FIFO"):
+        self.method = method
+        self.lots = defaultdict(list)  # asset -> list of lots
+
+    def add_lot(self, asset, quantity, price, date, trade_id):
+        """Record new acquisition"""
+        lot = {
+            'lot_id': f"LOT-{trade_id}",
+            'quantity': Decimal(str(quantity)),
+            'remaining': Decimal(str(quantity)),
+            'price': Decimal(str(price)),
+            'date': date,
+            'trade_id': trade_id
+        }
+        self.lots[asset].append(lot)
+
+    def consume_lots(self, asset, quantity, sale_date):
+        """Consume lots based on method, return cost basis info"""
+        quantity = Decimal(str(quantity))
+        consumed = []
+        remaining = quantity
+
+        # Sort lots based on method
+        if self.method == "FIFO":
+            sorted_lots = sorted(self.lots[asset], key=lambda x: x['date'])
+        elif self.method == "LIFO":
+            sorted_lots = sorted(self.lots[asset], key=lambda x: x['date'], reverse=True)
+        elif self.method == "HIFO":
+            sorted_lots = sorted(self.lots[asset], key=lambda x: x['price'], reverse=True)
+
+        for lot in sorted_lots:
+            if remaining <= 0:
+                break
+            if lot['remaining'] <= 0:
+                continue
+
+            take = min(remaining, lot['remaining'])
+            lot['remaining'] -= take
+            remaining -= take
+
+            holding_days = (sale_date - lot['date']).days
+            consumed.append({
+                'lot_id': lot['lot_id'],
+                'quantity': take,
+                'cost_basis': take * lot['price'],
+                'acquisition_date': lot['date'],
+                'holding_period_days': holding_days,
+                'is_long_term': holding_days > 365
+            })
+
+        return consumed
+```
+
+#### Wash Sale Detection (US Tax Rule)
+
+```python
+class WashSaleDetector:
+    """
+    IRS Wash Sale Rule: Cannot claim loss if you buy "substantially
+    identical" security within 30 days before or after the sale.
+    """
+    WASH_SALE_WINDOW = 30  # days
+
+    def check_wash_sale(self, sale_trade, all_trades):
+        if sale_trade.realized_gain_loss >= 0:
+            return False, Decimal('0')  # Only applies to losses
+
+        # Look for purchases 30 days before/after
+        window_start = sale_trade.timestamp - timedelta(days=self.WASH_SALE_WINDOW)
+        window_end = sale_trade.timestamp + timedelta(days=self.WASH_SALE_WINDOW)
+
+        repurchases = [
+            t for t in all_trades
+            if t.symbol == sale_trade.symbol
+            and t.side == "BUY"
+            and window_start <= t.timestamp <= window_end
+            and t.trade_id != sale_trade.trade_id
+        ]
+
+        if repurchases:
+            # Loss is disallowed, but added to cost basis of repurchase
+            disallowed_loss = abs(sale_trade.realized_gain_loss)
+            return True, disallowed_loss
+
+        return False, Decimal('0')
+```
+
+#### Tax Report Generation
+
+**US Form 8949 Format (Crypto & Securities)**
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│ FORM 8949 - Sales and Other Dispositions of Capital Assets                │
+│ Tax Year: 2026                                                             │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Part I: Short-Term (held 1 year or less)                                   │
+├──────────────┬──────────┬──────────┬──────────┬──────────┬────────────────┤
+│ Description  │ Acquired │ Sold     │ Proceeds │ Cost     │ Gain/(Loss)    │
+├──────────────┼──────────┼──────────┼──────────┼──────────┼────────────────┤
+│ 0.5 BTC      │ 01/15/26 │ 01/20/26 │ $21,500  │ $21,200  │ $300           │
+│ 2.0 ETH      │ 01/18/26 │ 01/22/26 │ $4,850   │ $4,920   │ ($70) W        │
+│ 100 EUR/USD  │ 01/25/26 │ 01/25/26 │ $108.50  │ $108.00  │ $0.50          │
+│ ...          │          │          │          │          │                │
+├──────────────┴──────────┴──────────┴──────────┴──────────┴────────────────┤
+│ TOTALS: 1,247 transactions                                                 │
+│ Total Proceeds: $847,250    Total Cost: $839,180    Net Gain: $8,070      │
+│ Wash Sale Adjustments: $2,450                                              │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Automated Report Generator:**
+```python
+class TaxReportGenerator:
+    def generate_form_8949(self, tax_year):
+        """Generate IRS Form 8949 compatible report"""
+        trades = self.db.get_trades_by_year(tax_year)
+
+        short_term = [t for t in trades if t.holding_period_days <= 365]
+        long_term = [t for t in trades if t.holding_period_days > 365]
+
+        report = {
+            'tax_year': tax_year,
+            'generated_at': datetime.utcnow().isoformat(),
+
+            'short_term': {
+                'transactions': len(short_term),
+                'total_proceeds': sum(t.proceeds for t in short_term),
+                'total_cost_basis': sum(t.cost_basis for t in short_term),
+                'total_gain_loss': sum(t.realized_gain_loss for t in short_term),
+                'wash_sale_adjustments': sum(t.wash_sale_adjustment for t in short_term),
+                'trades': [self._format_8949_row(t) for t in short_term]
+            },
+
+            'long_term': {
+                'transactions': len(long_term),
+                'total_proceeds': sum(t.proceeds for t in long_term),
+                'total_cost_basis': sum(t.cost_basis for t in long_term),
+                'total_gain_loss': sum(t.realized_gain_loss for t in long_term),
+                'trades': [self._format_8949_row(t) for t in long_term]
+            },
+
+            'summary': {
+                'total_transactions': len(trades),
+                'net_short_term': sum(t.realized_gain_loss for t in short_term),
+                'net_long_term': sum(t.realized_gain_loss for t in long_term),
+                'total_fees_paid': sum(t.total_fees for t in trades)
+            }
+        }
+
+        return report
+
+    def export_csv(self, tax_year, format='turbo_tax'):
+        """Export in format compatible with tax software"""
+        trades = self.db.get_trades_by_year(tax_year)
+
+        if format == 'turbo_tax':
+            headers = ['Currency Name', 'Purchase Date', 'Cost Basis',
+                      'Date Sold', 'Proceeds', 'Gain/Loss']
+        elif format == 'tax_act':
+            headers = ['Description', 'Date Acquired', 'Date Sold',
+                      'Proceeds', 'Cost Basis', 'Gain/Loss', 'Term']
+        elif format == 'crypto_tax_calculator':
+            headers = ['Timestamp', 'Type', 'Asset', 'Amount', 'Price',
+                      'Fee', 'Exchange', 'Cost Basis', 'Proceeds', 'Gain']
+
+        rows = [self._format_row(t, format) for t in trades]
+        return self._to_csv(headers, rows)
+```
+
+#### Crypto-Specific Considerations
+
+| Event | Tax Treatment (US) | Tracking Required |
+|-------|-------------------|-------------------|
+| Buy crypto with USD | Not taxable | Record cost basis |
+| Sell crypto for USD | Taxable gain/loss | Calculate from cost basis |
+| Crypto-to-crypto trade | **Taxable event** | Both sides recorded |
+| Receive staking rewards | **Ordinary income** | FMV at receipt |
+| DeFi yield | **Ordinary income** | FMV at receipt |
+| Transfer between wallets | Not taxable | Track for cost basis |
+| Gas/network fees | Add to cost basis | Record all fees |
+
+**Crypto-to-Crypto Handling:**
+```python
+def record_crypto_swap(self, from_asset, to_asset, from_amount, to_amount, timestamp):
+    """
+    BTC → ETH swap is TWO taxable events:
+    1. Sell BTC (realize gain/loss)
+    2. Buy ETH (establish new cost basis)
+    """
+    # Step 1: Calculate BTC sale
+    btc_fmv = self.get_fair_market_value('BTC', timestamp)
+    btc_proceeds = from_amount * btc_fmv
+
+    btc_sale = self.record_sale(
+        asset='BTC',
+        quantity=from_amount,
+        proceeds=btc_proceeds,
+        timestamp=timestamp
+    )
+
+    # Step 2: Record ETH purchase at same value
+    eth_cost_basis = btc_proceeds  # What you "paid" in USD terms
+
+    self.cost_basis_tracker.add_lot(
+        asset='ETH',
+        quantity=to_amount,
+        price=eth_cost_basis / to_amount,
+        date=timestamp,
+        trade_id=f"{btc_sale.trade_id}-swap"
+    )
+
+    return btc_sale
+```
+
+#### Forex (Section 988 vs Section 1256)
+
+| Treatment | Section 988 | Section 1256 |
+|-----------|-------------|--------------|
+| Default for | Spot forex | Futures, options |
+| Tax rate | Ordinary income | 60% long-term, 40% short-term |
+| Loss limit | Unlimited | $3,000/year |
+| Mark-to-market | No | Yes (year-end) |
+| Election | Can opt out | Default for contracts |
+
+```python
+def categorize_forex_trade(self, trade):
+    """Determine tax treatment for forex"""
+    if trade.instrument_type in ['FUTURE', 'OPTION']:
+        return 'SECTION_1256'  # 60/40 treatment
+    elif trade.instrument_type == 'SPOT':
+        if self.has_1256_election:
+            return 'SECTION_1256'
+        return 'SECTION_988'  # Ordinary income/loss
+```
+
+#### Monthly Tax Estimate Report
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│              MONTHLY TAX ESTIMATE - January 2026                           │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  TRADING ACTIVITY                                                          │
+│  ─────────────────                                                         │
+│  Total Trades:              1,847                                          │
+│  Crypto Trades:             1,523 (all short-term)                         │
+│  Forex Trades:              312 (Section 988)                              │
+│  CFD Trades:                12                                             │
+│                                                                            │
+│  REALIZED GAINS/LOSSES                                                     │
+│  ─────────────────────                                                     │
+│  Crypto Short-Term Gains:   $892.45                                        │
+│  Crypto Short-Term Losses:  ($156.20)                                      │
+│  Net Crypto:                $736.25                                        │
+│                                                                            │
+│  Forex (Section 988):       $124.80 (ordinary income)                      │
+│  CFD Gains:                 $18.50                                         │
+│                                                                            │
+│  TOTAL TAXABLE:             $879.55                                        │
+│                                                                            │
+│  ESTIMATED TAX LIABILITY                                                   │
+│  ────────────────────────                                                  │
+│  Assuming 32% bracket (short-term + ordinary):                             │
+│  Federal:                   $281.46                                        │
+│  State (CA 9.3%):           $81.80                                         │
+│  Total Estimated:           $363.26                                        │
+│                                                                            │
+│  QUARTERLY ESTIMATE (if annualized):                                       │
+│  Q1 Estimated Payment:      $1,089.78 (due April 15)                       │
+│                                                                            │
+│  WASH SALES THIS MONTH:     3 trades, $45.20 disallowed                   │
+│                                                                            │
+│  COST BASIS INVENTORY                                                      │
+│  ────────────────────                                                      │
+│  BTC lots held: 12 (oldest: 01/05/26, newest: 01/30/26)                   │
+│  ETH lots held: 8 (oldest: 01/08/26, newest: 01/29/26)                    │
+│  USD stablecoin: $45.20 (no tax impact)                                   │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Integration with Tax Software
+
+| Software | Export Format | Automation |
+|----------|--------------|------------|
+| **TurboTax** | CSV, TXF | Direct import |
+| **H&R Block** | CSV | Manual upload |
+| **TaxAct** | CSV | Direct import |
+| **CoinTracker** | API sync | Real-time |
+| **Koinly** | API sync | Real-time |
+| **TokenTax** | CSV, API | Both supported |
+| **ZenLedger** | API sync | Real-time |
+
+**Auto-sync with Crypto Tax Services:**
+```python
+class TaxServiceSync:
+    def sync_to_koinly(self, api_key):
+        """Push trades to Koinly for automatic tax calculation"""
+        trades = self.get_unsynced_trades()
+
+        for trade in trades:
+            koinly_format = {
+                'date': trade.timestamp.isoformat(),
+                'type': 'sell' if trade.side == 'SELL' else 'buy',
+                'from_amount': str(trade.quantity) if trade.side == 'SELL' else None,
+                'from_currency': trade.symbol.split('/')[0] if trade.side == 'SELL' else None,
+                'to_amount': str(trade.quantity) if trade.side == 'BUY' else None,
+                'to_currency': trade.symbol.split('/')[0] if trade.side == 'BUY' else None,
+                'fee_amount': str(trade.total_fees),
+                'fee_currency': 'USD',
+                'exchange': trade.exchange,
+                'external_id': trade.trade_id
+            }
+            self.koinly_api.create_transaction(koinly_format)
+            trade.mark_synced('koinly')
+```
+
+#### Audit Trail & Record Retention
+
+**IRS requires 3-7 years of records. We keep everything.**
+
+```python
+class AuditTrailManager:
+    def log_trade_complete(self, trade, raw_response):
+        """Store complete audit trail for every trade"""
+
+        audit_record = {
+            'trade_id': trade.trade_id,
+            'timestamp': datetime.utcnow(),
+
+            # Original exchange response (proof)
+            'exchange_response': raw_response,
+
+            # Screenshots/state at time of trade
+            'orderbook_snapshot': self.capture_orderbook(trade.symbol),
+            'balance_before': self.get_balance_snapshot(),
+            'balance_after': None,  # Filled after confirmation
+
+            # Calculation audit
+            'cost_basis_calculation': {
+                'method': trade.cost_basis_method,
+                'lots_consumed': trade.consumed_lots,
+                'remaining_lots': self.get_remaining_lots(trade.symbol)
+            },
+
+            # System state
+            'system_version': self.version,
+            'config_hash': self.get_config_hash()
+        }
+
+        # Store in append-only audit log
+        self.audit_db.insert(audit_record)
+
+        # Also backup to immutable storage
+        self.backup_to_s3(audit_record)
+```
+
+**Record Retention Policy:**
+```
+Trade Records:        Keep forever (cost basis needed for future sales)
+Daily Summaries:      Keep 10 years
+Exchange Statements:  Keep 7 years
+Tax Reports:          Keep 7 years
+Audit Logs:           Keep forever
+API Responses:        Keep 3 years (can compress after)
+```
+
+### 16.10 Scaling Plan
 
 As the account grows, unlock additional strategies:
 
@@ -2116,7 +2652,7 @@ $10000+ (Day 241+)
 └── Reinvest: 50%, withdraw 50%
 ```
 
-### 16.10 Emergency Procedures
+### 16.11 Emergency Procedures
 
 #### Automatic Shutdown Conditions
 
@@ -2151,7 +2687,7 @@ def check_emergency_conditions(self):
 /resume            - Resume trading after pause
 ```
 
-### 16.11 Legal & Compliance Notes
+### 16.12 Legal & Compliance Notes
 
 **Disclaimer**: This system is for educational and research purposes. Before trading with real money:
 
@@ -2191,7 +2727,7 @@ def check_emergency_conditions(self):
 
 ---
 
-*Document Version: 3.0*
+*Document Version: 3.1*
 *Last Updated: January 2026*
 *Author: Arbitrage Analysis Team*
 
@@ -2199,3 +2735,4 @@ def check_emergency_conditions(self):
 - v1.0: Initial plan with G10 currencies and precious metals
 - v2.0: Added 30+ EM currencies, energy, agricultural commodities, strategic metals, free data sources
 - v3.0: Added complete trading execution module for $100 account targeting 2x in 60 days
+- v3.1: Added comprehensive tax reporting system with IRS-compliant trade logging, cost basis tracking, wash sale detection, and tax software integration
