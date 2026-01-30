@@ -1565,7 +1565,615 @@ If HIBOR_Spike > 200 bps: Defense mode, intervention likely
 
 ---
 
-## 15. Glossary
+## 16. TRADING EXECUTION MODULE
+
+### 16.1 Account Parameters & Goals
+
+**Starting Capital**: $100
+**Target**: 2x account every 60 days (100% return)
+**Required Daily Return**: ~1.16% compound
+**Required Weekly Return**: ~8.4%
+**Risk Tolerance**: Aggressive but controlled
+
+```
+Growth Trajectory:
+Day 0:   $100.00
+Day 15:  $118.87  (+18.9%)
+Day 30:  $141.28  (+41.3%)
+Day 45:  $167.91  (+67.9%)
+Day 60:  $199.50  (+99.5%) ≈ $200 TARGET
+Day 90:  $398.00  (4x)
+Day 120: $795.00  (8x)
+Day 180: $3,170   (32x)
+Day 365: $63,400  (634x) - theoretical maximum
+```
+
+### 16.2 Strategy Selection for $100 Account
+
+Given the small account size, we must focus on:
+1. **Zero/low commission brokers**
+2. **No minimum position sizes** (or very low)
+3. **High leverage available** (carefully managed)
+4. **Liquid markets** (tight spreads)
+
+#### Optimal Strategies by Account Size
+
+| Account Size | Best Strategies | Why |
+|--------------|-----------------|-----|
+| **$100-500** | Crypto arb, FX micro-lots, CFDs | No minimums, 24/7, high leverage |
+| **$500-2000** | Add: Commodity CFDs, more FX pairs | Can diversify |
+| **$2000-10000** | Add: Futures micro-contracts, options | Meet minimums |
+| **$10000+** | Full strategy suite | Professional access |
+
+#### Primary Strategies for $100 Account
+
+**Strategy 1: Crypto Exchange Arbitrage (40% allocation)**
+```
+Capital Allocated: $40
+Exchanges: Binance, Coinbase, Kraken, KuCoin
+Target Pairs: BTC/USDT, ETH/USDT, SOL/USDT
+Expected Spread: 10-50 bps during volatility
+Trades/Day: 5-20
+Expected Daily Return: 0.3-0.8%
+```
+
+**Strategy 2: Crypto Triangular Arbitrage (25% allocation)**
+```
+Capital Allocated: $25
+Exchange: Single exchange (Binance preferred)
+Triangles: BTC→ETH→USDT→BTC, BTC→SOL→USDT→BTC
+Expected Spread: 5-20 bps
+Trades/Day: 10-50
+Expected Daily Return: 0.2-0.5%
+```
+
+**Strategy 3: FX Micro-Lot Trading (20% allocation)**
+```
+Capital Allocated: $20
+Broker: OANDA, Forex.com (micro-lot support)
+Pairs: EUR/USD, GBP/USD, USD/JPY
+Strategy: Statistical arb on correlations
+Leverage: 10:1 max
+Expected Daily Return: 0.3-0.6%
+```
+
+**Strategy 4: Stablecoin Yield + Arbitrage (15% allocation)**
+```
+Capital Allocated: $15
+Platforms: DeFi (Aave, Compound), CEX earn
+Base Yield: 5-15% APY
+Arb Opportunities: USDT/USDC/DAI spreads
+Expected Daily Return: 0.1-0.3%
+```
+
+### 16.3 Broker & Exchange Integration
+
+#### Crypto Exchanges (Primary - Best for $100)
+
+| Exchange | API | Fees | Min Trade | Why Use |
+|----------|-----|------|-----------|---------|
+| **Binance** | REST + WebSocket | 0.1% (0.075% w/ BNB) | $1 | Best liquidity, most pairs |
+| **Coinbase Pro** | REST + WebSocket | 0.5% maker/taker | $1 | US regulated, fiat on-ramp |
+| **Kraken** | REST + WebSocket | 0.16%/0.26% | $1 | Good for EUR pairs |
+| **KuCoin** | REST + WebSocket | 0.1% | $1 | Many altcoins, arb opportunities |
+| **Bybit** | REST + WebSocket | 0.1% | $1 | Good derivatives |
+
+**API Integration Code Structure:**
+```python
+# Unified exchange interface
+class ExchangeAdapter:
+    def __init__(self, exchange_name, api_key, secret):
+        self.exchange = ccxt.exchange_name({
+            'apiKey': api_key,
+            'secret': secret,
+            'enableRateLimit': True
+        })
+
+    def get_ticker(self, symbol):
+        return self.exchange.fetch_ticker(symbol)
+
+    def place_order(self, symbol, side, amount, price=None):
+        if price:
+            return self.exchange.create_limit_order(symbol, side, amount, price)
+        return self.exchange.create_market_order(symbol, side, amount)
+
+    def get_balance(self):
+        return self.exchange.fetch_balance()
+```
+
+#### Forex Brokers (Secondary)
+
+| Broker | API | Min Deposit | Min Lot | Leverage | Notes |
+|--------|-----|-------------|---------|----------|-------|
+| **OANDA** | REST v20 | $0 | 1 unit | 50:1 | Best for micro accounts |
+| **Forex.com** | REST | $100 | 1K units | 50:1 | Good execution |
+| **IG** | REST | $250 | Micro | 30:1 | CFDs available |
+
+**OANDA API Example:**
+```python
+import oandapyV20
+from oandapyV20.endpoints import orders, pricing
+
+class ForexTrader:
+    def __init__(self, account_id, access_token):
+        self.client = oandapyV20.API(access_token=access_token)
+        self.account_id = account_id
+
+    def get_price(self, instrument):
+        params = {"instruments": instrument}
+        r = pricing.PricingInfo(self.account_id, params=params)
+        return self.client.request(r)
+
+    def market_order(self, instrument, units):
+        data = {
+            "order": {
+                "type": "MARKET",
+                "instrument": instrument,
+                "units": str(units),
+                "timeInForce": "FOK"
+            }
+        }
+        r = orders.OrderCreate(self.account_id, data=data)
+        return self.client.request(r)
+```
+
+### 16.4 Position Sizing for $100 Account
+
+#### Kelly Criterion Adaptation
+
+```
+Optimal Position Size = (Win_Rate × Avg_Win - Loss_Rate × Avg_Loss) / Avg_Win
+
+For arbitrage with:
+- Win Rate: 85%
+- Avg Win: 0.3%
+- Avg Loss: 0.5%
+
+Kelly = (0.85 × 0.003 - 0.15 × 0.005) / 0.003 = 0.60 (60%)
+
+Half-Kelly (safer): 30% per trade
+Quarter-Kelly (conservative): 15% per trade
+```
+
+#### Position Sizing Rules
+
+| Strategy | Max Position | Max Leverage | Stop Loss | Reason |
+|----------|-------------|--------------|-----------|--------|
+| Crypto Spot Arb | 40% of capital | 1x | 1% | Need funds on 2 exchanges |
+| Crypto Triangle | 25% of capital | 1x | 0.5% | Fast execution required |
+| FX Micro | 20% of capital | 10x | 2% | Leverage amplifies |
+| Stablecoin | 15% of capital | 1x | 0.1% | Very low risk |
+
+#### Concurrent Position Limits
+
+```
+Maximum Open Positions: 4
+Maximum Correlated Positions: 2
+Maximum Single-Asset Exposure: 50%
+Maximum Leverage (Portfolio): 5x effective
+Minimum Cash Reserve: 10% ($10)
+```
+
+### 16.5 Automated Execution Engine
+
+#### System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ARBITRAGE TRADING ENGINE                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                     SIGNAL GENERATOR                          │   │
+│  │  • Price feeds from all exchanges                            │   │
+│  │  • Arbitrage opportunity detection                           │   │
+│  │  • Signal scoring and ranking                                │   │
+│  └──────────────────────────────┬───────────────────────────────┘   │
+│                                 │                                    │
+│                                 ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                    RISK MANAGER                               │   │
+│  │  • Position sizing calculation                               │   │
+│  │  • Exposure limits check                                     │   │
+│  │  • Correlation analysis                                      │   │
+│  │  • Stop-loss levels                                          │   │
+│  └──────────────────────────────┬───────────────────────────────┘   │
+│                                 │                                    │
+│                    ┌────────────┴────────────┐                      │
+│                    ▼                         ▼                       │
+│  ┌─────────────────────────┐  ┌─────────────────────────────────┐   │
+│  │   EXECUTION MANAGER     │  │      PORTFOLIO TRACKER          │   │
+│  │  • Order routing        │  │  • P&L calculation              │   │
+│  │  • Slippage control     │  │  • Position tracking            │   │
+│  │  • Fill confirmation    │  │  • Performance metrics          │   │
+│  │  • Retry logic          │  │  • Daily/weekly reports         │   │
+│  └───────────┬─────────────┘  └─────────────────────────────────┘   │
+│              │                                                       │
+│              ▼                                                       │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                    EXCHANGE ADAPTERS                          │   │
+│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐            │   │
+│  │  │ Binance │ │Coinbase │ │  OANDA  │ │ Kraken  │            │   │
+│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘            │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Core Execution Logic
+
+```python
+class ArbitrageEngine:
+    def __init__(self, config):
+        self.exchanges = self._init_exchanges(config)
+        self.risk_manager = RiskManager(config)
+        self.portfolio = Portfolio(starting_capital=100)
+        self.min_profit_threshold = 0.001  # 0.1% minimum
+
+    async def run(self):
+        while True:
+            # 1. Fetch prices from all sources
+            prices = await self._fetch_all_prices()
+
+            # 2. Detect arbitrage opportunities
+            opportunities = self._detect_arbitrage(prices)
+
+            # 3. Filter by profitability (after fees)
+            viable = [o for o in opportunities
+                     if o.net_profit > self.min_profit_threshold]
+
+            # 4. Rank by risk-adjusted return
+            ranked = sorted(viable, key=lambda x: x.sharpe, reverse=True)
+
+            # 5. Check risk limits
+            for opp in ranked:
+                if self.risk_manager.can_trade(opp):
+                    # 6. Execute trade
+                    result = await self._execute_trade(opp)
+
+                    # 7. Update portfolio
+                    self.portfolio.update(result)
+
+                    # 8. Log for analysis
+                    self._log_trade(result)
+
+            await asyncio.sleep(0.1)  # 100ms cycle
+
+    def _detect_arbitrage(self, prices):
+        opportunities = []
+
+        # Cross-exchange spread
+        for pair in self.pairs:
+            for ex1, ex2 in itertools.combinations(self.exchanges, 2):
+                spread = self._calculate_spread(prices, pair, ex1, ex2)
+                if spread > self.min_profit_threshold:
+                    opportunities.append(CrossExchangeArb(pair, ex1, ex2, spread))
+
+        # Triangular arbitrage
+        for exchange in self.exchanges:
+            triangles = self._find_triangular_arb(prices, exchange)
+            opportunities.extend(triangles)
+
+        return opportunities
+```
+
+### 16.6 Risk Management System
+
+#### Hard Limits (Non-Negotiable)
+
+```python
+class RiskManager:
+    # HARD LIMITS - Never exceeded
+    MAX_DAILY_LOSS = 0.05        # 5% max daily loss
+    MAX_WEEKLY_LOSS = 0.15       # 15% max weekly loss
+    MAX_DRAWDOWN = 0.25          # 25% max drawdown from peak
+    MAX_SINGLE_TRADE_LOSS = 0.02 # 2% max loss per trade
+    MAX_POSITION_SIZE = 0.40     # 40% max single position
+    MAX_LEVERAGE = 10            # 10x max leverage
+    MIN_CASH_RESERVE = 0.10      # 10% always in cash
+
+    def can_trade(self, opportunity):
+        # Check all limits
+        if self.daily_pnl < -self.MAX_DAILY_LOSS * self.peak_equity:
+            return False  # Stop trading for the day
+
+        if self.weekly_pnl < -self.MAX_WEEKLY_LOSS * self.weekly_start:
+            return False  # Stop trading for the week
+
+        if self.current_drawdown > self.MAX_DRAWDOWN:
+            return False  # In drawdown protection mode
+
+        position_size = self._calculate_position(opportunity)
+        if position_size > self.MAX_POSITION_SIZE * self.equity:
+            return False
+
+        return True
+```
+
+#### Dynamic Risk Adjustment
+
+```
+Risk Scaling Based on Performance:
+
+If Weekly Return > +5%:
+  → Increase position sizes by 10% (momentum)
+
+If Weekly Return < -3%:
+  → Reduce position sizes by 25% (protection)
+
+If Max Drawdown > 15%:
+  → Reduce position sizes by 50%
+  → Switch to conservative strategies only
+
+If Max Drawdown > 20%:
+  → Stop automated trading
+  → Require manual review
+```
+
+#### Circuit Breakers
+
+| Condition | Action | Duration |
+|-----------|--------|----------|
+| 3 consecutive losses | Pause 5 minutes | Auto-resume |
+| 5% daily loss | Stop for day | Next day |
+| 10% weekly loss | Stop for week | Manual reset |
+| 20% drawdown | Stop all trading | Manual review |
+| Exchange API error | Skip exchange | 1 hour |
+| Unusual spread (>5%) | Skip opportunity | 1 minute |
+
+### 16.7 Trade Execution Protocols
+
+#### Pre-Trade Checklist (Automated)
+
+```python
+def pre_trade_check(self, opportunity):
+    checks = {
+        'sufficient_balance': self._check_balance(opportunity),
+        'within_risk_limits': self.risk_manager.can_trade(opportunity),
+        'spread_still_valid': self._verify_spread(opportunity),
+        'exchange_healthy': self._check_exchange_status(opportunity),
+        'no_pending_orders': self._check_pending_orders(),
+        'within_trading_hours': self._check_trading_hours(opportunity),
+    }
+    return all(checks.values()), checks
+```
+
+#### Order Execution Sequence
+
+**For Cross-Exchange Arbitrage:**
+```
+1. Verify balances on both exchanges
+2. Place SELL order on higher-priced exchange (limit, IOC)
+3. If fill confirmed within 100ms:
+   → Place BUY order on lower-priced exchange
+4. If BUY doesn't fill within 200ms:
+   → Cancel and reverse SELL position
+5. Record results and update portfolio
+```
+
+**For Triangular Arbitrage:**
+```
+1. Calculate exact quantities for all 3 legs
+2. Submit all 3 orders simultaneously
+3. Monitor fills:
+   - All 3 filled → Success
+   - Partial fills → Complete remaining legs at market
+   - Failed leg → Unwind positions
+4. Maximum execution time: 500ms
+5. Cancel all if incomplete after timeout
+```
+
+#### Slippage Control
+
+```python
+class SlippageManager:
+    MAX_SLIPPAGE = 0.002  # 0.2% max slippage
+
+    def calculate_safe_size(self, orderbook, target_amount):
+        """Calculate max size that stays within slippage tolerance"""
+        cumulative = 0
+        total_cost = 0
+        mid_price = (orderbook['bids'][0][0] + orderbook['asks'][0][0]) / 2
+
+        for price, size in orderbook['asks']:
+            slippage = (price - mid_price) / mid_price
+            if slippage > self.MAX_SLIPPAGE:
+                break
+            cumulative += size
+            total_cost += price * size
+            if cumulative >= target_amount:
+                break
+
+        return min(cumulative, target_amount)
+```
+
+### 16.8 Performance Tracking & Reporting
+
+#### Real-Time Dashboard
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    ARBITRAGE BOT DASHBOARD                           │
+│                    Started: $100.00 | Current: $147.32               │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  PERFORMANCE                          POSITION STATUS                │
+│  ─────────────────                    ────────────────               │
+│  Today:      +$2.15 (+1.48%)          Open Positions: 2              │
+│  This Week:  +$12.45 (+9.2%)          BTC/USDT Long: $25.00          │
+│  Total:      +$47.32 (+47.3%)         ETH/BTC Arb: $18.50            │
+│  Days Active: 28                                                     │
+│  Target Pace: ████████████░░░░ 78%    Cash Reserve: $103.82          │
+│                                                                      │
+│  RISK METRICS                         TODAY'S TRADES                 │
+│  ─────────────                        ──────────────                 │
+│  Max Drawdown: 8.2%                   Total: 47                      │
+│  Current DD: 2.1%                     Won: 41 (87%)                  │
+│  Sharpe (30D): 2.4                    Lost: 6 (13%)                  │
+│  Win Rate: 84%                        Avg Win: +0.35%                │
+│  Avg Trade: +0.18%                    Avg Loss: -0.42%               │
+│                                                                      │
+│  STRATEGY BREAKDOWN                                                  │
+│  ──────────────────                                                  │
+│  Crypto X-Exchange: +$28.50 (42 trades, 88% win)                    │
+│  Crypto Triangle:   +$12.20 (156 trades, 82% win)                   │
+│  FX Micro:          +$4.80 (18 trades, 78% win)                     │
+│  Stablecoin:        +$1.82 (yield, no trades)                       │
+│                                                                      │
+│  RECENT ACTIVITY                                                     │
+│  ───────────────                                                     │
+│  14:32:15 | BTC Binance→Coinbase | +$0.42 (+0.31%) | 180ms          │
+│  14:31:02 | ETH→BTC→USDT→ETH    | +$0.18 (+0.14%) | 95ms           │
+│  14:28:45 | SOL Binance→Kraken  | -$0.15 (-0.12%) | 220ms SLIP     │
+│  14:25:33 | EUR/USD stat arb    | +$0.28 (+0.22%) | Closed          │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+#### Daily Report (Automated)
+
+```
+DAILY ARBITRAGE REPORT - January 30, 2026
+==========================================
+
+ACCOUNT SUMMARY
+Starting Balance: $145.17
+Ending Balance:   $147.32
+Daily P&L:        +$2.15 (+1.48%)
+Cumulative P&L:   +$47.32 (+47.3%)
+
+PROGRESS TO GOAL
+Days Elapsed:     28 of 60
+Target Balance:   $158.74
+Actual Balance:   $147.32
+Status:           BEHIND PACE (-7.2%)
+Required Daily:   1.95% (vs 1.16% target) to catch up
+
+TRADE STATISTICS
+Total Trades:     47
+Win Rate:         87.2% (41/47)
+Profit Factor:    3.8
+Average Win:      +$0.52 (+0.35%)
+Average Loss:     -$0.62 (-0.42%)
+Largest Win:      +$1.85 (BTC cross-exchange)
+Largest Loss:     -$0.95 (SOL slippage)
+
+STRATEGY PERFORMANCE
+┌────────────────────┬─────────┬────────┬──────────┐
+│ Strategy           │ P&L     │ Trades │ Win Rate │
+├────────────────────┼─────────┼────────┼──────────┤
+│ Crypto X-Exchange  │ +$1.42  │ 12     │ 92%      │
+│ Crypto Triangle    │ +$0.58  │ 28     │ 82%      │
+│ FX Micro           │ +$0.12  │ 5      │ 80%      │
+│ Stablecoin Yield   │ +$0.03  │ -      │ -        │
+└────────────────────┴─────────┴────────┴──────────┘
+
+RISK METRICS
+Max Intraday Drawdown: 1.2%
+Peak Equity Today:     $148.50
+Exposure (Avg):        65%
+Leverage (Avg):        1.2x
+
+RECOMMENDATIONS
+• SOL arbitrage showing high slippage - reduce allocation
+• BTC cross-exchange performing well - consider +5% allocation
+• FX opportunities limited today - check Asian session
+```
+
+### 16.9 Scaling Plan
+
+As the account grows, unlock additional strategies:
+
+```
+$100 → $200 (Days 1-60)
+├── Primary: Crypto spot arbitrage
+├── Secondary: Crypto triangular
+├── Goal: Prove system works
+└── Reinvest: 100% of profits
+
+$200 → $500 (Days 61-90)
+├── Add: More exchange pairs
+├── Add: Larger position sizes
+├── Add: Micro FX with 20:1 leverage
+└── Reinvest: 90% of profits
+
+$500 → $2000 (Days 91-150)
+├── Add: Commodity CFDs
+├── Add: Crypto futures (basis trade)
+├── Add: Multiple simultaneous strategies
+└── Reinvest: 80% of profits
+
+$2000 → $10000 (Days 151-240)
+├── Add: Micro futures (ES, NQ, GC)
+├── Add: Options strategies
+├── Add: More sophisticated stat arb
+└── Reinvest: 70% of profits
+
+$10000+ (Day 241+)
+├── Full strategy suite available
+├── Consider professional infrastructure
+├── Tax optimization strategies
+└── Reinvest: 50%, withdraw 50%
+```
+
+### 16.10 Emergency Procedures
+
+#### Automatic Shutdown Conditions
+
+```python
+EMERGENCY_SHUTDOWN_CONDITIONS = [
+    ('daily_loss', lambda x: x < -0.10),      # 10% daily loss
+    ('drawdown', lambda x: x > 0.30),          # 30% drawdown
+    ('exchange_error_rate', lambda x: x > 0.5), # 50% API errors
+    ('balance_discrepancy', lambda x: x > 0.05), # 5% balance mismatch
+    ('unusual_volatility', lambda x: x > 5.0),  # 5x normal vol
+]
+
+def check_emergency_conditions(self):
+    for name, condition in EMERGENCY_SHUTDOWN_CONDITIONS:
+        value = getattr(self.metrics, name)
+        if condition(value):
+            self._emergency_shutdown(reason=name)
+            self._alert_operator(f"EMERGENCY: {name} triggered")
+            return True
+    return False
+```
+
+#### Manual Override Commands
+
+```
+/stop              - Stop all trading immediately
+/pause             - Pause new trades, keep positions
+/close_all         - Close all positions at market
+/status            - Get full system status
+/risk reduce 50    - Reduce all position sizes by 50%
+/withdraw <amount> - Initiate withdrawal
+/resume            - Resume trading after pause
+```
+
+### 16.11 Legal & Compliance Notes
+
+**Disclaimer**: This system is for educational and research purposes. Before trading with real money:
+
+1. **Verify legality** in your jurisdiction
+2. **Understand tax implications** of frequent trading
+3. **Accept that losses are possible** despite arbitrage being "low risk"
+4. **Start with paper trading** to validate the system
+5. **Never trade money you can't afford to lose**
+
+**Crypto-specific**:
+- Verify exchange is licensed in your jurisdiction
+- Understand withdrawal limits and KYC requirements
+- Be aware of potential exchange insolvency risk
+
+**Forex-specific**:
+- Use regulated brokers (NFA in US, FCA in UK)
+- Understand leverage risks
+- Be aware of swap/rollover costs
+
+---
+
+## 17. Glossary
 
 | Term | Definition |
 |------|------------|
@@ -1583,7 +2191,11 @@ If HIBOR_Spike > 200 bps: Defense mode, intervention likely
 
 ---
 
-*Document Version: 2.0*
+*Document Version: 3.0*
 *Last Updated: January 2026*
 *Author: Arbitrage Analysis Team*
-*Expanded: Added 30+ currencies, energy commodities, agricultural commodities, strategic metals, and comprehensive arbitrage frameworks*
+
+**Version History:**
+- v1.0: Initial plan with G10 currencies and precious metals
+- v2.0: Added 30+ EM currencies, energy, agricultural commodities, strategic metals, free data sources
+- v3.0: Added complete trading execution module for $100 account targeting 2x in 60 days
